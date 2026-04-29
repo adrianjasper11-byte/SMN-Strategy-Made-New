@@ -119,7 +119,7 @@ const VoiceAgent: React.FC = () => {
 
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Microphone access is not supported in this browser or context (requires HTTPS).");
+          throw new Error("Microphone access is not supported in this browser context (requires HTTPS).");
         }
 
         streamRef.current = await navigator.mediaDevices.getUserMedia({ 
@@ -137,12 +137,21 @@ const VoiceAgent: React.FC = () => {
         throw new Error(`Microphone error: ${micErr.message || "Failed to access microphone"}`);
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      // Safe access to API Key for both local dev, AI Studio preview, and external deployments (like Netlify)
+      // Note: process.env.GEMINI_API_KEY is standard for AI Studio's free tier.
+      // process.env.API_KEY is used if the user has selected a key via the AI Studio Select Key dialog.
+      const apiKey = (typeof process !== 'undefined') 
+        ? (process.env.GEMINI_API_KEY || process.env.API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY)
+        : (import.meta as any).env?.VITE_GEMINI_API_KEY;
+
       if (!apiKey) {
-        throw new Error("Gemini API key is missing. Please set GEMINI_API_KEY in the app settings.");
+        throw new Error("API Key missing. If you're the developer, please ensure GEMINI_API_KEY is configured in your project secrets.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
+      
+      // Additional check for mobile Safari/iPhone
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
       
       const sessionPromise = ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
@@ -151,11 +160,14 @@ const VoiceAgent: React.FC = () => {
             setIsConnecting(false);
             setIsActive(true);
             
-            const source = audioContextRef.current!.createMediaStreamSource(streamRef.current!);
-            processorRef.current = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
+            if (!audioContextRef.current || !streamRef.current) return;
+
+            const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+            // On mobile, ScriptProcessor 4096 can be laggy; 0 or 2048 is sometimes safer, but 4096 is often standard.
+            processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
             
             source.connect(processorRef.current);
-            processorRef.current.connect(audioContextRef.current!.destination);
+            processorRef.current.connect(audioContextRef.current.destination);
             
             processorRef.current.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
@@ -168,7 +180,7 @@ const VoiceAgent: React.FC = () => {
               
               sessionPromise.then((session) => {
                 session.sendRealtimeInput({
-                  audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
+                  audio: { data: base64Data, mimeType: `audio/pcm;rate=${audioContextRef.current?.sampleRate || SAMPLE_RATE}` }
                 });
               }).catch(err => {
                 console.error("Session input error:", err);
