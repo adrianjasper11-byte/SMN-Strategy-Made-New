@@ -137,15 +137,12 @@ const VoiceAgent: React.FC = () => {
         throw new Error(`Microphone error: ${micErr.message || "Failed to access microphone"}`);
       }
 
-      // Safe access to API Key for both local dev, AI Studio preview, and external deployments (like Netlify)
-      // Note: process.env.GEMINI_API_KEY is standard for AI Studio's free tier.
-      // process.env.API_KEY is used if the user has selected a key via the AI Studio Select Key dialog.
-      const apiKey = (typeof process !== 'undefined') 
-        ? (process.env.GEMINI_API_KEY || process.env.API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY)
-        : (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      // Access the Gemini API key from the environment. 
+      // In AI Studio, this is automatically injected into process.env.
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
       if (!apiKey) {
-        throw new Error("API Key missing. If you're the developer, please ensure GEMINI_API_KEY is configured in your project secrets.");
+        throw new Error("Gemini API Key is not configured. Please add it to your project Secrets in AI Studio.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
