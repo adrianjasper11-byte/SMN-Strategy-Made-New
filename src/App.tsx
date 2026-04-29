@@ -6,7 +6,6 @@
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowRight, CheckCircle2, ChevronRight, Menu, X, MessageCircle, Copy, Check, Layers } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
-import VoiceAgent from "./components/VoiceAgent";
 
 const CopyEmail = ({ address }: { address: string }) => {
   const [copied, setCopied] = useState(false);
@@ -463,9 +462,6 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Interactive Voice Experience */}
-      <VoiceAgent />
-
       {/* Floating WhatsApp Button */}
       <motion.a
         href="https://wa.me/353861280725"
@@ -478,6 +474,7 @@ export default function App() {
       >
         <MessageCircle size={28} />
       </motion.a>
+
     </div>
   );
 }
