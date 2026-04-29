@@ -92,6 +92,16 @@ const VoiceAgent: React.FC = () => {
     source.start();
   };
 
+  const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  };
+
   const startSession = async () => {
     setIsConnecting(true);
     setError(null);
@@ -107,28 +117,40 @@ const VoiceAgent: React.FC = () => {
         await audioContextRef.current.resume();
       }
 
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          sampleRate: SAMPLE_RATE,
-          channelCount: 1,
-          echoCancellation: true,
-        } 
-      });
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Microphone access is not supported in this browser or context (requires HTTPS).");
+        }
+
+        streamRef.current = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } 
+        });
+      } catch (micErr: any) {
+        console.error("Microphone Error:", micErr);
+        if (micErr.name === 'NotAllowedError' || micErr.name === 'PermissionDeniedError') {
+          throw new Error("Microphone access denied. Please check your browser's site permissions for this URL.");
+        }
+        throw new Error(`Microphone error: ${micErr.message || "Failed to access microphone"}`);
+      }
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not set. Please add it to your environment variables.");
+        throw new Error("Gemini API key is missing. Please set GEMINI_API_KEY in the app settings.");
       }
+      
       const ai = new GoogleGenAI({ apiKey });
       
-      sessionRef.current = await ai.live.connect({
+      const sessionPromise = ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         callbacks: {
           onopen: () => {
             setIsConnecting(false);
             setIsActive(true);
             
-            // Set up microphone capture
             const source = audioContextRef.current!.createMediaStreamSource(streamRef.current!);
             processorRef.current = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
             
@@ -137,20 +159,20 @@ const VoiceAgent: React.FC = () => {
             
             processorRef.current.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              
-              // Convert Float32 to Int16
               const int16 = new Int16Array(inputData.length);
               for (let i = 0; i < inputData.length; i++) {
-                  int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
               }
               
-              const base64Data = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
+              const base64Data = arrayBufferToBase64(int16.buffer);
               
-              if (sessionRef.current) {
-                sessionRef.current.sendRealtimeInput({
+              sessionPromise.then((session) => {
+                session.sendRealtimeInput({
                   audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
                 });
-              }
+              }).catch(err => {
+                console.error("Session input error:", err);
+              });
             };
           },
           onmessage: (message) => {
@@ -166,14 +188,10 @@ const VoiceAgent: React.FC = () => {
               setIsSpeaking(false);
               isPlayingRef.current = false;
             }
-
-            if (message.serverContent?.modelTurn?.parts[0]?.text) {
-                // Handle transcription if enabled (but we'll just focus on audio for now)
-            }
           },
           onerror: (err) => {
             console.error("Live API Error:", err);
-            setError("Something went wrong with the voice agent.");
+            setError("The voice agent encountered an error. Please try again.");
             stopSession();
           },
           onclose: () => {
@@ -189,10 +207,14 @@ const VoiceAgent: React.FC = () => {
         }
       });
 
+      // Store session for cleanup
+      sessionRef.current = (await sessionPromise);
+
     } catch (err) {
       console.error("Failed to start voice session:", err);
-      setError("Mircophone access denied or API error.");
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
       setIsConnecting(false);
+      stopSession();
     }
   };
 
